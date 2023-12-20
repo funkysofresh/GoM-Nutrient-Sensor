@@ -1,0 +1,112 @@
+'CR1000 Series Datalogger
+SequentialMode
+
+Const WIZ_Port = Com1
+
+Public WIZ_State As Long
+
+Public WIZ_StartCycle As Boolean
+
+Public PTemp, batt_volt
+Public Data_Wiz As String *300 ,DataResult_Wiz(20) As String *300 'Wiz
+Const Control_wiz=1
+Const StartStr="#C"&CHR(13)&CHR(10)
+Const StatusStr="#S"&CHR(13)&CHR(10)
+Const CalStr="#K"&CHR(13)&CHR(10)
+Const WashStr="#W"&CHR(13)&CHR(10)
+Const StopStr="#X"&CHR(13)&CHR(10)
+Const DataStr="#D0"&CHR(13)&CHR(10)
+
+Dim tempString As String * 16
+Public WIZ_LastStatus As String
+
+
+
+'Wiz Data
+'need to create alias for each data point
+Alias DataResult_Wiz(1)=NA
+Alias DataResult_Wiz(2)=NA2
+Alias DataResult_Wiz(3)=Date
+Alias DataResult_Wiz(4)=Time
+Alias DataResult_Wiz(5)=M1_Conc
+Alias DataResult_Wiz(6)=NOx_Conc 
+Alias DataResult_Wiz(7)=M3_Conc
+Alias DataResult_Wiz(8)=M4_Conc
+Alias DataResult_Wiz(9)=M1_OD1
+Alias DataResult_Wiz(10)=NOx_OD1
+Alias DataResult_Wiz(11)=M3_OD1
+Alias DataResult_Wiz(12)=M4_OD1
+Alias DataResult_Wiz(13)=M1_OD2
+Alias DataResult_Wiz(14)=NOx_OD2
+Alias DataResult_Wiz(15)=M3_OD2
+Alias DataResult_Wiz(16)=M4_OD2
+
+DataTable (WIZ_Data_1,1,-1 )
+  Sample (20,DataResult_Wiz(),IEEE4)
+EndTable
+
+BeginProg
+  SerialOpen (WIZ_Port,9600,0,0,1000) 'wiz COM1
+
+  Scan (30,Sec,0,0)
+    PanelTemp (PTemp,250)
+    Battery (batt_volt)
+
+    'turn sensor on at the top of every 2 hours'
+    If TimeIntoInterval(60,120,min) Then
+      PortSet(8,1)
+      EndIf
+      
+    'turn sensor off 45 minutes into every 2 hours'
+    If TimeIntoInterval(105,120,min) Then
+      PortSet(8,0)
+      EndIf
+      
+    'Automatically start 5 minutes into every 2 hours
+    If TimeIntoInterval (65,120,min) Then
+      WIZ_StartCycle = false
+      WIZ_State = 1
+      SerialOut (WIZ_Port,StartStr,"",0,0)
+    EndIf
+
+    'Poll status every 30 seconds to see if data is ready.
+    If WIZ_State = 1 Then
+      SerialFlush(WIZ_Port)
+      SerialOut (WIZ_Port,StatusStr,"",0,0)
+      Erase(tempString)
+      SerialIn (tempString,WIZ_Port,100,13,16)
+      WIZ_LastStatus = tempString
+      If InStr (1,tempString,"STAND",2) Then
+        WIZ_State = 2
+      EndIf
+    EndIf
+
+    If WIZ_State = 2 Then
+      WIZ_State = 3
+      SerialOut (WIZ_Port,DataStr,"",0,100)
+      'SerialIn will wait up to 4 seconds for the data.
+      SerialIn (Data_Wiz() ,WIZ_Port,400,0,3000) 'WIZ
+      SplitStr (DataResult_Wiz(),Data_Wiz(),CHR(32)&CHR(13)&CHR(10),20,7) 'Wiz Data Status.TimeStamp(1,1)
+      CallTable WIZ_Data_1
+    EndIf
+
+    'Stop the probe after getting data
+    If WIZ_State = 3 Then
+      WIZ_State = 0
+      SerialOut (WIZ_Port,StopStr,"",0,100) 'Stop the probe
+    EndIf
+
+    'Can manually trigger by setting WIZ_StartCycle to True
+    If WIZ_StartCycle Then 'Has to be after the block that checks for state 1
+      WIZ_StartCycle = false
+      WIZ_State = 1
+      SerialOut (WIZ_Port,StartStr,"",0,0)
+    EndIf
+
+
+
+
+  NextScan
+
+
+EndProg
